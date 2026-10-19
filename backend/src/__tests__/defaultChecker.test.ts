@@ -2,23 +2,15 @@ import { jest } from '@jest/globals';
 import { Account, Keypair } from '@stellar/stellar-sdk';
 import logger from '../utils/logger.js';
 
-// `checkOverdueLoans` calls the module-level `backfillExtensionDueLedgers()`
-// (added for #1804/PR #1956), which uses the real `query()` from
-// db/connection.js and cannot be stubbed per instance. Mock the db module —
-// same pattern as services/__tests__/defaultChecker.test.ts — so this test
-// never needs a live database. `backfillExtensionDueLedgers` treats an empty
-// row set as a no-op.
-type MockQueryResult = { rows: unknown[]; rowCount?: number };
-
-const mockQuery: jest.MockedFunction<
-  (text: string, params?: unknown[]) => Promise<MockQueryResult>
-> = jest.fn(async () => ({ rows: [] }));
-
-jest.unstable_mockModule('../db/connection.js', () => ({
+// checkOverdueLoans runs backfillExtensionDueLedgers(), which queries the
+// database directly; keep the unit test off a real connection.
+const mockQuery = jest.fn<() => Promise<{ rows: unknown[] }>>().mockResolvedValue({ rows: [] });
+await jest.unstable_mockModule('../db/connection.js', () => ({
   default: { query: mockQuery },
   query: mockQuery,
   getClient: jest.fn(),
   closePool: jest.fn(),
+  withTransaction: jest.fn(),
 }));
 
 const { DefaultChecker } = await import('../services/defaultChecker.js');
