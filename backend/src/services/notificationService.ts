@@ -224,11 +224,13 @@ class NotificationService {
     >,
   ): Promise<NotificationPreferences> {
     const result = await query(
-      `UPDATE user_profiles
-       SET email_enabled = $2,
-           sms_enabled = $3,
-           phone = $4
-       WHERE public_key = $1
+      `INSERT INTO user_profiles (public_key, email_enabled, sms_enabled, phone)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (public_key) DO UPDATE
+       SET email_enabled = EXCLUDED.email_enabled,
+           sms_enabled = EXCLUDED.sms_enabled,
+           phone = EXCLUDED.phone,
+           updated_at = current_timestamp
        RETURNING email_enabled, sms_enabled, phone`,
       [userId, payload.emailEnabled, payload.smsEnabled, payload.phone],
     );

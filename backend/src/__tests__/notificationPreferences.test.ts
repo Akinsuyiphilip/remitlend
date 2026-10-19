@@ -40,6 +40,7 @@ await jest.unstable_mockModule('../services/sorobanService.js', () => ({
 await import('../db/connection.js');
 const { default: app } = await import('../app.js');
 const { generateJwtToken } = await import('../services/authService.js');
+const { notificationService } = await import('../services/notificationService.js');
 
 const bearer = (publicKey: string) => ({
   Authorization: `Bearer ${generateJwtToken(publicKey)}`,
@@ -148,5 +149,28 @@ describe('notification preferences endpoints', () => {
       });
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('updateNotificationPreferences upsert', () => {
+  it('upserts into user_profiles so settings persist when no profile row exists', async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ email_enabled: true, sms_enabled: false, phone: null }],
+      rowCount: 1,
+    });
+    mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+    const result = await notificationService.updateNotificationPreferences('GNEWUSER', {
+      emailEnabled: true,
+      smsEnabled: false,
+      phone: null,
+      perTypeOverrides: {},
+    });
+
+    const [sql, params] = mockQuery.mock.calls[0]!;
+    expect(sql).toMatch(/INSERT INTO user_profiles/);
+    expect(sql).toMatch(/ON CONFLICT \(public_key\) DO UPDATE/);
+    expect(params).toEqual(['GNEWUSER', true, false, null]);
+    expect(result.emailEnabled).toBe(true);
   });
 });
