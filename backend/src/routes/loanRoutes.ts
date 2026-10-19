@@ -16,6 +16,7 @@ import {
   extendLoan,
   buildLiquidateLoan,
   submitTransaction,
+  submitRefinanceTransaction,
 } from '../controllers/loanController.js';
 import { getLoanEvents } from '../controllers/indexerController.js';
 import { requireJwtAuth, requireScopes, requireWalletOwnership } from '../middleware/jwtAuth.js';
@@ -322,7 +323,7 @@ router.get(
  *   post:
  *     summary: Build an unsigned loan request transaction
  *     description: >
- *       Builds an unsigned Soroban `request_loan(borrower, amount)` transaction XDR.
+ *       Builds an unsigned Soroban `request_loan(borrower, amount, term)` transaction XDR.
  *       The frontend signs it with the user's wallet and submits via POST /api/loans/submit.
  *     tags: [Loans]
  *     security:
@@ -344,6 +345,10 @@ router.get(
  *               borrowerPublicKey:
  *                 type: string
  *                 description: Borrower's Stellar public key (must match JWT)
+ *               term:
+ *                 type: number
+ *                 description: Loan term in ledgers (defaults to 17280)
+ *                 example: 17280
  *     responses:
  *       200:
  *         description: Unsigned transaction XDR returned
@@ -528,6 +533,17 @@ router.post(
   validateBody(refinanceLoanSchema),
   idempotencyMiddleware,
   refinanceLoan,
+);
+
+router.post(
+  '/:loanId/submit-refinance',
+  requireJwtAuth,
+  requireScopes('write:loans'),
+  requireLoanOwner,
+  validateParams(repayLoanParamsSchema),
+  validateBody(submitTxSchema),
+  idempotencyMiddleware,
+  submitRefinanceTransaction,
 );
 
 /**

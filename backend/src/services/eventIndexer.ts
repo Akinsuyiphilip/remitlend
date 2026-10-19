@@ -12,7 +12,6 @@ import { eventStreamService } from './eventStreamService.js';
 import { notificationService, type NotificationType } from './notificationService.js';
 import { sorobanService } from './sorobanService.js';
 import { updateUserScoresBulk } from './scoresService.js';
-import { AppError } from '../errors/AppError.js';
 import { recordIndexerLedgers } from '../middleware/metrics.js';
 import { setPauseState } from '../middleware/pauseGuard.js';
 import { fromStroops } from '../money/decimal.js';
@@ -81,6 +80,8 @@ interface ContractEvent extends IndexedLoanEvent {
   value: string;
   interestRateBps?: number;
   termLedgers?: number;
+  /** Absolute on-chain due ledger emitted by LoanExtended. */
+  dueLedger?: number;
 }
 
 interface EventIndexerConfig {
@@ -454,9 +455,6 @@ export class EventIndexer {
           fetchedEvents: 0,
           insertedEvents: 0,
         };
-        throw AppError.badRequest(
-          `Invalid ledger range: endLedger (${endLedger}) cannot be less than startLedger (${startLedger})`,
-        );
       }
 
       try {
@@ -582,7 +580,7 @@ export class EventIndexer {
     await withTransaction(async (client: PoolClient) => {
       for (const event of parsedEvents) {
         const insertResult = await client.query(
-          `INSERT INTO loan_events (
+          `INSERT INTO contract_events (
             event_id,
             event_type,
             loan_id,
@@ -595,9 +593,10 @@ export class EventIndexer {
             topics,
             value,
             interest_rate_bps,
-            term_ledgers
+            term_ledgers,
+            due_ledger
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           ON CONFLICT DO NOTHING
           RETURNING event_id`,
           [
@@ -614,6 +613,7 @@ export class EventIndexer {
             event.value,
             event.interestRateBps ?? null,
             event.termLedgers ?? null,
+            event.dueLedger ?? null,
           ],
         );
 
@@ -761,6 +761,7 @@ export class EventIndexer {
     let amount: string | undefined;
     let interestRateBps: number | undefined;
     let termLedgers: number | undefined;
+    let dueLedger: number | undefined;
     let borrowerRefund: string | undefined;
 
     if (type === 'LoanRequested') {
@@ -850,7 +851,11 @@ export class EventIndexer {
       address = this.decodeAddress(event.topic[2]);
       const data = scValToNative(event.value);
       if (Array.isArray(data) && data.length >= 2) {
+        dueLedger = Number(data[0]);
         amount = data[1].toString();
+      }
+      if (!Number.isSafeInteger(dueLedger) || dueLedger! <= 0) {
+        throw new Error(`LoanExtended event has invalid new_due_ledger: ${event.id}`);
       }
     } else if (type === 'LoanCancelled') {
       // (type, borrower), loan_id
@@ -1018,32 +1023,12 @@ export class EventIndexer {
       ...(loanId !== undefined ? { loanId } : {}),
       ...(interestRateBps !== undefined ? { interestRateBps } : {}),
       ...(termLedgers !== undefined ? { termLedgers } : {}),
+      ...(dueLedger !== undefined ? { dueLedger } : {}),
       ...(address !== undefined ? { address } : {}),
       ...(adminAddress !== undefined ? { adminAddress } : {}),
       ...(borrowerRefund !== undefined ? { borrowerRefund } : {}),
     };
   }
-
-  /* private async _updateUserScore(userId: string, delta: number): Promise<void> {
-    if (!userId) return;
-    try {
-      await query(
-        `INSERT INTO scores (borrower, score)
-         VALUES ($1, $2)
-         ON CONFLICT (borrower)
-         DO UPDATE SET
-           score = LEAST(850, GREATEST(300, scores.score + $3)),
-           updated_at = CURRENT_TIMESTAMP`,
-        [userId, 500 + delta, delta],
-      );
-      logger.withContext().info('Updated user score from indexed event', {
-        userId,
-        delta,
-      });
-    } catch (error) {
-      logger.withContext().error('Failed to update user score', { userId, error });
-    }
-  } */
 
   private async triggerNotification(event: ContractEvent): Promise<void> {
     if (!event.address) return;
