@@ -56,11 +56,6 @@ const KEY_PROPOSAL_COUNT: Symbol = symbol_short!("COUNT");
 const REPROPOSAL_COOLDOWN_SECONDS: u64 = 3600; // 1 hour
 const CURRENT_VERSION: u32 = 1;
 
-/// Minimum ledger TTL before the instance is bumped (≈24 h at 5 s/ledger).
-const INSTANCE_TTL_THRESHOLD: u32 = 17_280;
-/// Ledger TTL bump amount (≈30 days at 5 s/ledger).
-const INSTANCE_TTL_BUMP: u32 = 518_400;
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -694,6 +689,8 @@ impl GovernanceContract {
             .instance()
             .get(&KEY_TARGET)
             .ok_or(GovernanceError::TargetNotSet)
+    }
+
     pub fn get_targets(env: Env) -> Result<Vec<Address>, GovernanceError> {
         Self::bump_instance_ttl(&env);
         Self::read_targets(&env)
