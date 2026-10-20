@@ -7,6 +7,7 @@ import {
   Address,
   StrKey,
   Keypair,
+  authorizeEntry,
 } from '@stellar/stellar-sdk';
 import logger from '../utils/logger.js';
 import { AppError } from '../errors/AppError.js';
@@ -47,7 +48,7 @@ class SorobanService {
     const borrowerScVal = nativeToScVal(Address.fromString(borrower), {
       type: 'address',
     });
-    const loanIdScVal = nativeToScVal(loanId, { type: 'symbol' });
+    const loanIdScVal = nativeToScVal(Number(loanId), { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -80,10 +81,7 @@ class SorobanService {
 
     const account = await server.getAccount(adminPublicKey);
 
-    const adminScVal = nativeToScVal(Address.fromString(adminPublicKey), {
-      type: 'address',
-    });
-    const loanIdScVal = nativeToScVal(loanId, { type: 'symbol' });
+    const loanIdScVal = nativeToScVal(Number(loanId), { type: 'u32' });
     const reasonScVal = nativeToScVal(reason, { type: 'string' });
 
     const tx = new TransactionBuilder(account, {
@@ -94,7 +92,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'reject_loan',
-          args: [adminScVal, loanIdScVal, reasonScVal],
+          args: [loanIdScVal, reasonScVal],
         }),
       )
       .setTimeout(30)
@@ -196,12 +194,13 @@ class SorobanService {
   }
 
   /**
-   * Builds an unsigned Soroban `request_loan(borrower, amount)` transaction.
+   * Builds an unsigned Soroban `request_loan(borrower, amount, term)` transaction.
    * Returns base64 XDR for the frontend to sign with the user's wallet.
    */
   async buildRequestLoanTx(
     borrowerPublicKey: string,
     amount: number,
+    termLedgers: number,
   ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
     const server = this.getRpcServer();
     const contractId = this.getLoanManagerContractId();
@@ -212,7 +211,8 @@ class SorobanService {
     const borrowerScVal = nativeToScVal(Address.fromString(borrowerPublicKey), {
       type: 'address',
     });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
+    const termScVal = nativeToScVal(termLedgers, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -222,7 +222,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'request_loan',
-          args: [borrowerScVal, amountScVal],
+          args: [borrowerScVal, amountScVal, termScVal],
         }),
       )
       .setTimeout(30)
@@ -234,6 +234,7 @@ class SorobanService {
     logger.withContext().info('Built request_loan transaction', {
       borrower: borrowerPublicKey,
       amount,
+      termLedgers,
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };
@@ -258,7 +259,7 @@ class SorobanService {
       type: 'address',
     });
     const loanIdScVal = nativeToScVal(loanId, { type: 'u32' });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -287,7 +288,7 @@ class SorobanService {
   }
 
   /**
-   * Builds an unsigned Soroban `deposit(provider, token, amount)` transaction
+   * Builds an unsigned Soroban `deposit(provider, token, amount, min_shares_out)` transaction
    * against the LendingPool contract.
    * Returns base64 XDR for the frontend to sign with the user's wallet.
    */
@@ -295,6 +296,7 @@ class SorobanService {
     providerPublicKey: string,
     tokenAddress: string,
     amount: number,
+    minSharesOut: number,
   ): Promise<{ unsignedTxXdr: string; networkPassphrase: string }> {
     const server = this.getRpcServer();
     const contractId = this.getLendingPoolContractId();
@@ -308,7 +310,8 @@ class SorobanService {
     const tokenScVal = nativeToScVal(Address.fromString(tokenAddress), {
       type: 'address',
     });
-    const amountScVal = nativeToScVal(BigInt(amount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(amount.toString()), { type: 'i128' });
+    const minSharesOutScVal = nativeToScVal(BigInt(minSharesOut), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -318,7 +321,7 @@ class SorobanService {
         Operation.invokeContractFunction({
           contract: contractId,
           function: 'deposit',
-          args: [providerScVal, tokenScVal, amountScVal],
+          args: [providerScVal, tokenScVal, amountScVal, minSharesOutScVal],
         }),
       )
       .setTimeout(30)
@@ -331,6 +334,7 @@ class SorobanService {
       provider: providerPublicKey,
       token: tokenAddress,
       amount,
+      minSharesOut,
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };
@@ -360,7 +364,7 @@ class SorobanService {
       type: 'address',
     });
     const sharesScVal = nativeToScVal(BigInt(shares), { type: 'i128' });
-    const minAssetsOutScVal = nativeToScVal(BigInt(minAssetsOut), { type: 'i128' });
+    const minAssetsOutScVal = nativeToScVal(toStroops(minAssetsOut.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -413,7 +417,7 @@ class SorobanService {
       type: 'address',
     });
     const sharesScVal = nativeToScVal(BigInt(shares), { type: 'i128' });
-    const minAssetsOutScVal = nativeToScVal(BigInt(minAssetsOut), { type: 'i128' });
+    const minAssetsOutScVal = nativeToScVal(toStroops(minAssetsOut.toString()), { type: 'i128' });
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -586,7 +590,7 @@ class SorobanService {
     const account = await server.getAccount(borrowerPublicKey);
 
     const loanIdScVal = nativeToScVal(loanId, { type: 'u32' });
-    const amountScVal = nativeToScVal(BigInt(newAmount), { type: 'i128' });
+    const amountScVal = nativeToScVal(toStroops(newAmount.toString()), { type: 'i128' });
     const termScVal = nativeToScVal(newTerm, { type: 'u32' });
 
     const tx = new TransactionBuilder(account, {
@@ -614,6 +618,91 @@ class SorobanService {
     });
 
     return { unsignedTxXdr, networkPassphrase: passphrase };
+  }
+
+  /** Adds the configured loan-manager admin's Soroban auth signature to a
+   * borrower-signed refinance transaction. The signature is limited to this
+   * loan's refinance invocation; arbitrary transactions are rejected. */
+  async signRefinanceAuthorization(
+    signedTxXdr: string,
+    borrowerPublicKey: string,
+    loanId: number,
+  ): Promise<string> {
+    const adminSecret = process.env.LOAN_MANAGER_ADMIN_SECRET;
+    if (!adminSecret) {
+      throw AppError.internal('Loan manager admin signer is not configured');
+    }
+
+    const passphrase = this.getNetworkPassphrase();
+    const tx = TransactionBuilder.fromXDR(signedTxXdr, passphrase);
+    const envelope = tx.toEnvelope();
+    const innerTx = envelope.v1().tx();
+    const operations = innerTx.operations();
+    if (operations.length !== 1 || !('source' in tx) || tx.source !== borrowerPublicKey) {
+      throw AppError.badRequest(
+        'Expected a single refinance transaction from the authenticated borrower',
+      );
+    }
+
+    const operation = operations[0];
+    if (!operation || operation.body().switch().name !== 'invokeHostFunction') {
+      throw AppError.badRequest('Transaction is not a refinance contract call');
+    }
+    const invoke = operation.body().invokeHostFunctionOp();
+    const hostFunction = invoke.hostFunction();
+    if (hostFunction.switch().name !== 'hostFunctionTypeInvokeContract') {
+      throw AppError.badRequest('Transaction is not a refinance contract call');
+    }
+    const invocation = hostFunction.invokeContract();
+    const contractAddress = Address.fromScAddress(invocation.contractAddress()).toString();
+    const args = invocation.args();
+    const loanIdArg = args[0];
+    if (
+      contractAddress !== this.getLoanManagerContractId() ||
+      invocation.functionName() !== 'refinance_loan' ||
+      args.length !== 3 ||
+      !loanIdArg ||
+      Number(scValToNative(loanIdArg)) !== loanId
+    ) {
+      throw AppError.badRequest('Transaction does not match the requested loan refinance');
+    }
+
+    const admin = Keypair.fromSecret(adminSecret);
+    const adminAddress = admin.publicKey();
+    const authEntries = invoke.auth();
+    const adminEntryIndexes: number[] = [];
+    authEntries.forEach((entry, index) => {
+      try {
+        const entryAddress = Address.fromScAddress(
+          entry.credentials().address().address(),
+        ).toString();
+        const rootFunction = entry.rootInvocation().function();
+        if (
+          entryAddress === adminAddress &&
+          rootFunction.switch().name === 'sorobanAuthorizedFunctionTypeContractFn' &&
+          rootFunction.contractFn().functionName() === 'refinance_loan'
+        ) {
+          adminEntryIndexes.push(index);
+        }
+      } catch {
+        // Source-account and non-address credentials are not admin auth entries.
+      }
+    });
+    if (adminEntryIndexes.length === 0) {
+      throw AppError.badRequest('Transaction is missing the loan-manager admin authorization');
+    }
+
+    const latestLedger = await this.getRpcServer().getLatestLedger();
+    const validUntilLedger = latestLedger.sequence + 100;
+    for (const index of adminEntryIndexes) {
+      const authEntry = authEntries[index];
+      if (!authEntry) {
+        throw AppError.badRequest('Transaction contains an invalid admin authorization entry');
+      }
+      authEntries[index] = await authorizeEntry(authEntry, admin, validUntilLedger, passphrase);
+    }
+    invoke.auth(authEntries);
+    return envelope.toXDR('base64');
   }
 
   /**
